@@ -6,6 +6,7 @@ import os
 
 from rest_framework.reverse import reverse
 
+from rssfeed.settings import MAXIMUM_RETRY
 from rssfeedapi.models import Feed
 from rssfeedapi.utils import get_published_parsed
 
@@ -46,7 +47,7 @@ class TestFeedUpdate:
             with patch('rssfeedapi.tasks.update_feed_entries', mock_entries_update):
                 response = api_client.put(url)
                 assert response.status_code == 200
-                assert mock_entries_update.call_count == 3
+                assert mock_entries_update.call_count == 1 + MAXIMUM_RETRY
                 updated_feed = Feed.objects.get(id=feed.id)
                 assert updated_feed.status == Feed.Status.ERROR
 

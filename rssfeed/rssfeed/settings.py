@@ -152,7 +152,7 @@ SWAGGER_SETTINGS = {
             'in': 'header'
         }
     },
-    'USE_SESSION_AUTH': True,
+    'USE_SESSION_AUTH': False,
 
 }
 
@@ -211,3 +211,5 @@ LOGGING = {
 }
 
 DAYS_RETRIEVABLE = 7
+MAXIMUM_RETRY = 2
+UPDATE_INTERVAL = 60.0  # Update feeds at background every 60s

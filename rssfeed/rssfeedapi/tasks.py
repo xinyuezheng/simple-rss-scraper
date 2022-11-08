@@ -7,6 +7,7 @@ from django.db.models import Count
 from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
 
+from rssfeed.settings import MAXIMUM_RETRY, UPDATE_INTERVAL
 from .models import Feed, Entry
 from celery.exceptions import MaxRetriesExceededError
 
@@ -50,7 +51,7 @@ def update_feed_entries(feed, parsed_dict):
     return update_error
 
 
-@app.task(retry_jitter=False, max_retries=2,)
+@app.task(retry_jitter=False, max_retries=MAXIMUM_RETRY,)
 def update_feed(feed_id):
     """
     celery task to update a feed and its entries. Retry if any exception occurs.
@@ -104,7 +105,6 @@ def update_feed(feed_id):
                 email_list = feed.subscribers.values_list('email', flat=True)
                 for email in email_list:
                     send_email(email, f"failed to update {feed.feed_url}")
-                    # logger.info(f'send email to {email}: failed to update {feed.feed_url}')
 
 
 @app.task
@@ -121,7 +121,7 @@ def update_active_feeds():
 
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
-    sender.add_periodic_task(10.0, update_active_feeds.s(), name='update active feeds')
+    sender.add_periodic_task(UPDATE_INTERVAL, update_active_feeds.s(), name='update active feeds')
 
 
 

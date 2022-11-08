@@ -42,7 +42,7 @@ class FeedListVew(ListCreateAPIView):
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
             return FeedSubscription.objects.none()
-        return FeedSubscription.objects.filter(user=self.request.user).order_by('feed__feed_url')
+        return FeedSubscription.objects.filter(user=self.request.user).select_related('feed')
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -119,7 +119,7 @@ class EntryDetailView(RetrieveAPIView):
         entry = self.get_object()
         serializer = self.get_serializer(entry)
 
-        read = ReadEntry.objects.filter(entry=entry, user=request.user).exists()
+        read = entry.read_by.filter(username=request.user).exists()
         return_dict = {}
         return_dict.update(serializer.data)  # serializer.data is immutable. copy it to another dict
         return_dict['read'] = read
@@ -129,8 +129,10 @@ class EntryDetailView(RetrieveAPIView):
         if getattr(self, 'swagger_fake_view', False):
             return Entry.objects.none()
 
-        return Entry.objects.filter(feed__in=self.request.user.subscriptions.values_list('id'),
-                                    published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE))
+        return Entry.objects.filter(
+            feed__in=self.request.user.subscriptions.values_list('id'),
+            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
+        ).prefetch_related('read_by')
 
 
 class EntryReadView(APIView):
@@ -185,4 +187,6 @@ class EntryListView(ListAPIView):
         if feed_id:
             entries = entries.filter(feed_id=feed_id)
 
-        return entries.filter(published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)).order_by('-published_time')
+        return entries.filter(
+            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
+        ).order_by('-published_time')
