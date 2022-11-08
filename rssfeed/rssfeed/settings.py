@@ -209,3 +209,5 @@ LOGGING = {
         }
     }
 }
+
+DAYS_RETRIEVABLE = 7

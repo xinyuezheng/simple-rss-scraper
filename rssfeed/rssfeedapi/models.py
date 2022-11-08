@@ -16,6 +16,7 @@ class FeedSubscription(models.Model):
     subscribed_time = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        ordering = ('id', )
         unique_together = ('user', 'feed',)
 
     def __str__(self):

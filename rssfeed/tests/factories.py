@@ -3,6 +3,8 @@ import datetime
 import factory
 from django.utils import timezone
 from faker import Faker
+
+from rssfeed.settings import DAYS_RETRIEVABLE
 from rssfeedapi.models import Feed, Entry
 from users.models import User
 
@@ -31,7 +33,7 @@ class EntryFactory(factory.django.DjangoModelFactory):
     link = fake.image_url()
     title = fake.text(10)
     description = fake.text(20)
-    published_time = fake.date_time(tzinfo=datetime.timezone.utc)
+    published_time = timezone.now() - datetime.timedelta(days=DAYS_RETRIEVABLE-1)
     feed = factory.SubFactory(FeedFactory)
 
 

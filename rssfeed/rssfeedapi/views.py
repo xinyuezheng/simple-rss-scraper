@@ -1,7 +1,10 @@
 import logging
+from datetime import timedelta
 
 from celery import group
+from django.db.models import Prefetch
 from django.http import Http404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.views.decorators.vary import vary_on_headers
@@ -14,6 +17,7 @@ from rest_framework.generics import ListCreateAPIView, \
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from rssfeed.settings import DAYS_RETRIEVABLE
 from .swagger_utils import feed_subscribed_200, feed_subscribed_201, feed_param, read_param
 from .tasks import update_feed
 
@@ -60,10 +64,10 @@ class FeedListVew(ListCreateAPIView):
 
 
 @method_decorator(name='get', decorator=swagger_auto_schema(
-    operation_summary="Show one feed subscribed by the user",
+    operation_summary=f"Show one followed feed content. Only show entries published in recent {DAYS_RETRIEVABLE} days",
 ))
 @method_decorator(name='put', decorator=swagger_auto_schema(
-    operation_summary="Update one feed subscribed by the user",
+    operation_summary="Update one feed",
     request_body=no_body,
     responses={200: "Feed will be updated at background"}
 ))
@@ -79,7 +83,11 @@ class FeedDetailView(RetrieveUpdateDestroyAPIView):
         if getattr(self, 'swagger_fake_view', False):
             return Feed.objects.none()
 
-        return self.request.user.subscriptions.order_by('feed_url')
+        return self.request.user.subscriptions.prefetch_related(
+            Prefetch('entries',
+                     queryset=Entry.objects.filter(published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE))
+                     )
+        )
 
     def perform_destroy(self, serializer):
         feed = self.get_object()
@@ -91,21 +99,22 @@ class FeedDetailView(RetrieveUpdateDestroyAPIView):
         update_feed.apply_async(args=(feed.id,), queue='force_feed_update',)
         return Response(f"Feed {feed.id} will be updated at background")
 
-
-class FeedUpdateView(APIView):
-    @swagger_auto_schema(operation_summary="Update all feeds subscribed by the user",
-                         request_body=no_body,
-                         responses={200: "Feed will be updated at background"})
-    def post(self, request, *args, **kwargs):
-        feeds = self.request.user.subscriptions
-        group(update_feed.s(feed.id) for feed in feeds).apply_async(queue='force_feed_update')
-        return Response("All feeds will be updated at background", status=status.HTTP_200_OK)
+# debug purpose
+# class FeedUpdateView(APIView):
+#     @swagger_auto_schema(operation_summary="Update all feeds subscribed by the user",
+#                          request_body=no_body,
+#                          responses={200: "Feed will be updated at background"})
+#     def post(self, request, *args, **kwargs):
+#         feeds = self.request.user.subscriptions
+#         group(update_feed.s(feed.id) for feed in feeds).apply_async(queue='force_feed_update')
+#         return Response("All feeds will be updated at background", status=status.HTTP_200_OK)
 
 
 class EntryDetailView(RetrieveAPIView):
     serializer_class = EntryDetailSerializer
 
-    @swagger_auto_schema(operation_summary="Show one entry subscribed by the user")
+    @swagger_auto_schema(
+        operation_summary=f"Show one followed entry details. Only published in recent {DAYS_RETRIEVABLE} days",)
     def get(self, request, *args, **kwargs):
         entry = self.get_object()
         serializer = self.get_serializer(entry)
@@ -120,11 +129,12 @@ class EntryDetailView(RetrieveAPIView):
         if getattr(self, 'swagger_fake_view', False):
             return Entry.objects.none()
 
-        return Entry.objects.filter(feed__in=self.request.user.subscriptions.values_list('id'))
+        return Entry.objects.filter(feed__in=self.request.user.subscriptions.values_list('id'),
+                                    published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE))
 
 
 class EntryReadView(APIView):
-    @swagger_auto_schema(operation_summary="Mark an entry as read",
+    @swagger_auto_schema(operation_summary=f"Mark an entry as read. Only published in recent {DAYS_RETRIEVABLE} days",
                          request_body=no_body,
                          responses={200: "The entry is already marked as read", 201: "The entry is marked as read"})
     def post(self, request, pk, **kargs):
@@ -144,7 +154,7 @@ class EntryReadView(APIView):
 
 @method_decorator(name='get',
                   decorator=[swagger_auto_schema(
-                        operation_summary="List entries subscribed by the user",
+                        operation_summary=f"List followed entries. Only published in recent {DAYS_RETRIEVABLE} days",
                         operation_description="'feed_id': Filter entries per feed. 'read': Filter read/unread entries."
                                             " They can be combined to filter read/unread entries globally or per feed",
                         manual_parameters=[feed_param, read_param],),
@@ -175,4 +185,4 @@ class EntryListView(ListAPIView):
         if feed_id:
             entries = entries.filter(feed_id=feed_id)
 
-        return entries.order_by('-published_time')
+        return entries.filter(published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)).order_by('-published_time')
