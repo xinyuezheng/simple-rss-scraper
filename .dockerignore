@@ -1,0 +1,5 @@
+.gitignore
+rssfeed/logs/*
+rssfeed/tests
+db/*
+celerybeat-schedule.db

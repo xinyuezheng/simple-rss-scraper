@@ -1,0 +1,50 @@
+version: '3'
+
+services:
+  web:
+    image: rssscraper:latest
+    command: python manage.py runserver 0.0.0.0:8000
+    env_file:
+      - docker.env
+    volumes:
+      - ./db:/home/appuser/db
+      - ./logs:/home/appuser/logs
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  celery_worker_force_update:
+    image: rssscraper:latest
+    command: celery -A rssfeed worker -l info -Q force_feed_update
+    env_file:
+      - docker.env
+    volumes:
+      - ./db:/home/appuser/db
+      - ./logs:/home/appuser/logs
+    restart: unless-stopped
+
+  celery_worker_default:
+    image: rssscraper:latest
+    command: celery -A rssfeed worker -l info -Q default
+    env_file:
+      - docker.env
+    volumes:
+      - ./db:/home/appuser/db
+      - ./logs:/home/appuser/logs
+    restart: unless-stopped
+
+  celery_beat:
+    image: rssscraper:latest
+    command: celery -A rssfeed beat -l info
+    env_file:
+      - docker.env
+    volumes:
+      - ./db:/home/appuser/db
+      - ./logs:/home/appuser/logs
+    restart: unless-stopped
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

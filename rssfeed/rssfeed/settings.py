@@ -9,10 +9,11 @@ https://docs.djangoproject.com/en/4.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.1/ref/settings/
 """
+import os
 from datetime import timedelta
 from pathlib import Path
 
-from kombu import Queue
+from kombu import Queue, Exchange
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,12 +23,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-+v%7+na0yd=f_p(9r%fh5zc^o!rvlhjeea!6&4h=sllpg61!@1'
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', False) == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["127.0.0.1",]
 
 
 # Application definition
@@ -83,7 +84,7 @@ WSGI_APPLICATION = 'rssfeed.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': BASE_DIR / 'db' / 'db.sqlite3',
     }
 }
 
@@ -156,17 +157,17 @@ SWAGGER_SETTINGS = {
 
 }
 
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379'
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL')
 CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TASK_SERIALIZER = 'json'
 # CELERY_RESULT_BACKEND = 'django-db'
 CELERY_TIMEZONE = TIME_ZONE
-CELERY_IGNORE_RESULT = True
+CELERY_IGNORE_RESULT = False
 CELERY_DEFAULT_QUEUE = 'default'
 CELERY_QUEUES = (
-    Queue('default'),
-    Queue('force_feed_update'),
+    Queue('default', Exchange('default'), routing_key='default'),
+    Queue('force_feed_update', Exchange('force_feed_update'), routing_key='force_feed_update'),
 )
 
 
@@ -210,6 +211,6 @@ LOGGING = {
     }
 }
 
-DAYS_RETRIEVABLE = 7
-MAXIMUM_RETRY = 2
-UPDATE_INTERVAL = 60.0  # Update feeds at background every 60s
+DAYS_RETRIEVABLE = int(os.getenv('DAYS_RETRIEVABLE'))
+MAXIMUM_RETRY = int(os.getenv('MAXIMUM_RETRY'))
+UPDATE_INTERVAL = float(os.getenv('UPDATE_INTERVAL'))  # Update feeds at background in seconds
