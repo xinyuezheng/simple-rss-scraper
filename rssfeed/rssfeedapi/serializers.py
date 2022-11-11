@@ -43,8 +43,8 @@ class FeedListSerializer(serializers.HyperlinkedModelSerializer):
 
     class Meta:
         model = FeedSubscription
-        fields = ('subscription_id', 'feed_url', 'feed', 'subscribed_time')
-        read_only_fields = ('subscription_id', 'feed', 'subscribed_time')
+        fields = ('feed', 'feed_url', 'subscribed_time', 'subscription_id', )
+        read_only_fields = ('feed', 'subscribed_time', 'subscription_id',)
 
         extra_kwargs = {
             'feed': {'view_name': 'rssfeedapi:feed_detail'},

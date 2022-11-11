@@ -15,7 +15,7 @@ from rssfeed.celery import app
 
 from .utils import get_published_parsed
 
-logger = logging.getLogger('rssfeed')
+logger = logging.getLogger(__name__)
 
 
 def send_email(email, msg):

@@ -3,7 +3,7 @@ version: '3'
 services:
   web:
     image: rssscraper:latest
-    command: python manage.py runserver 0.0.0.0:8000
+    command: python manage.py runserver 0.0.0.0:8000 --insecure
     env_file:
       - docker.env
     volumes:

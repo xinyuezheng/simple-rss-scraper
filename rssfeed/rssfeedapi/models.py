@@ -7,7 +7,7 @@ from rest_framework import status
 from rest_framework.exceptions import APIException, ValidationError
 
 from .utils import get_published_parsed
-logger = logging.getLogger('rssfeed')
+logger = logging.getLogger(__name__)
 
 
 class FeedSubscription(models.Model):

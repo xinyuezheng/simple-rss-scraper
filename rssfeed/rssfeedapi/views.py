@@ -24,7 +24,7 @@ from .tasks import update_feed
 from .serializers import FeedListSerializer, FeedDetailSerializer, EntryFilterSerializer, \
     EntryListSerializer, EntryDetailSerializer
 from .models import Entry, Feed, FeedSubscription, ReadEntry
-logger = logging.getLogger('rssfeed')
+logger = logging.getLogger(__name__)
 
 
 @method_decorator(name='get',

@@ -40,18 +40,24 @@ class TestEntryView:
         feeds = _create_feeds_in_db(2)
         user.subscriptions.add(feeds[0])
 
-        # Test list one subscribed entries
+        # Test get one not read entry
         entry = feeds[0].entries.first()
         url = reverse("rssfeedapi:entry_detail", args=[entry.id])
         response = api_client.get(url)
         assert response.status_code == 200
         response_json = response.json()
-        for key in ['title', 'link', 'description', 'author']:
+        for key in ['id', 'title', 'link', 'description', 'author']:
             assert getattr(entry, key) == response_json.get(key)
         assert response_json.get("published_time") == \
                serializers.DateTimeField().to_representation(entry.published_time)
         # By default entry is not marked read
         assert not response_json.get("read")
+
+        # Test get one read entry
+        user.read_entries.add(entry)  # prepare in DB
+        response = api_client.get(url)
+        assert response.status_code == 200
+        assert response.json().get("read")
 
         # Test list one of not subscribed entries
         entry = feeds[1].entries.first()
