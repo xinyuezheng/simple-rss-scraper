@@ -110,20 +110,18 @@ class FeedDetailView(RetrieveUpdateDestroyAPIView):
 #         return Response("All feeds will be updated at background", status=status.HTTP_200_OK)
 
 
+@method_decorator(
+    name='get',
+    decorator=swagger_auto_schema(
+        operation_summary=f"Show one followed entry details. Only published in recent {DAYS_RETRIEVABLE} days",),
+)
 class EntryDetailView(RetrieveAPIView):
     serializer_class = EntryDetailSerializer
 
-    @swagger_auto_schema(
-        operation_summary=f"Show one followed entry details. Only published in recent {DAYS_RETRIEVABLE} days",)
-    def get(self, request, *args, **kwargs):
-        entry = self.get_object()
-        serializer = self.get_serializer(entry)
-
-        read = entry.read_by.filter(username=request.user).exists()
-        return_dict = {}
-        return_dict.update(serializer.data)  # serializer.data is immutable. copy it to another dict
-        return_dict['read'] = read
-        return Response(return_dict)
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context.update({"username": self.request.user.username})
+        return context
 
     def get_queryset(self):
         if getattr(self, 'swagger_fake_view', False):
@@ -138,7 +136,7 @@ class EntryDetailView(RetrieveAPIView):
 class EntryReadView(APIView):
     @swagger_auto_schema(operation_summary=f"Mark an entry as read. Only published in recent {DAYS_RETRIEVABLE} days",
                          request_body=no_body,
-                         responses={200: "The entry is already marked as read", 201: "The entry is marked as read"})
+                         responses={200: EntryDetailSerializer, 201: EntryDetailSerializer})
     def post(self, request, pk, **kargs):
         entry = Entry.objects.filter(id=pk, feed__in=self.request.user.subscriptions.values_list('id')).first()
         if not entry:
@@ -146,23 +144,26 @@ class EntryReadView(APIView):
 
         if request.user.read_entries.filter(id=entry.id).exists():
             return_status = status.HTTP_200_OK
-            message = f"entry {entry.id} is already marked as read"
         else:
             request.user.read_entries.add(entry)
             return_status = status.HTTP_201_CREATED
-            message = f"entry {entry.id} is marked as read"
-        return Response(message, status=return_status)
+
+        entry_serializer = EntryDetailSerializer(entry,
+                                                 context={'request': request, 'username': self.request.user.username})
+        return Response(entry_serializer.data, status=return_status)
 
 
-@method_decorator(name='get',
-                  decorator=[swagger_auto_schema(
-                        operation_summary=f"List followed entries. Only published in recent {DAYS_RETRIEVABLE} days",
-                        operation_description="'feed_id': Filter entries per feed. 'read': Filter read/unread entries."
-                                            " They can be combined to filter read/unread entries globally or per feed",
-                        manual_parameters=[feed_param, read_param],),
-                      cache_page(60 * 60 * 2),
-                      vary_on_headers("Authorization", )]
-                  )
+@method_decorator(
+    name='get',
+    decorator=[
+        swagger_auto_schema(
+                operation_summary=f"List followed entries. Only published in recent {DAYS_RETRIEVABLE} days",
+                operation_description="'feed_id': Filter entries per feed. 'read': Filter read/unread entries. "
+                                      "Combine those to filter read/unread entries globally or per feed",
+                manual_parameters=[feed_param, read_param],),
+        cache_page(60 * 60 * 2),
+        vary_on_headers("Authorization", )]
+)
 class EntryListView(ListAPIView):
     serializer_class = EntryListSerializer
 

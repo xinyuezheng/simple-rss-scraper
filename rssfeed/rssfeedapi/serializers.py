@@ -11,7 +11,14 @@ class EntryListSerializer(serializers.ModelSerializer):
 
 
 class EntryDetailSerializer(serializers.HyperlinkedModelSerializer):
-    read = serializers.BooleanField(default=False)
+    read = serializers.SerializerMethodField('_is_read', read_only=True)
+
+    def _is_read(self, entry_obj) -> bool:
+        is_read = False
+        username = self.context.get("username")
+        if username:
+            is_read = entry_obj.read_by.filter(username=username).exists()
+        return is_read
 
     class Meta:
         model = Entry

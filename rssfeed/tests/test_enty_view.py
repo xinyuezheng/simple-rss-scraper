@@ -2,16 +2,19 @@ from datetime import timedelta
 
 import pytest
 from django.utils import timezone
+from rest_framework import serializers
 from rest_framework.reverse import reverse
 
 from rssfeed.settings import DAYS_RETRIEVABLE
+from rssfeedapi.models import Entry
 from tests.utils import _create_feeds_in_db
 
 
 @pytest.mark.django_db
 class TestEntryView:
-    def test_get_entries(self, user, api_client):
-        feeds = _create_feeds_in_db(3)
+    def test_list_entries(self, user, api_client):
+        # Setup DB: user subscribes to feed0 and feed1
+        feeds = _create_feeds_in_db(2)
         user.subscriptions.add(feeds[0])
         user.subscriptions.add(feeds[1])
 
@@ -19,22 +22,44 @@ class TestEntryView:
         url = reverse("rssfeedapi:entry_list")
         response = api_client.get(url)
         assert response.status_code == 200
-        assert response.json().get("count") == feeds[0].entries.count() + feeds[1].entries.count()
+        response_json = response.json()
+        assert response_json.get("count") == feeds[0].entries.count() + feeds[1].entries.count()
+        entry_ids_in_db = Entry.objects.filter(feed__in=feeds).values_list('id', flat=True)
+
+        # Test EntryListSerializer
+        for res in response_json.get('results'):
+            entry_id = res.get('id')
+            assert entry_id in entry_ids_in_db
+            entry_obj = Entry.objects.get(id=entry_id)
+            assert res['title'] == entry_obj.title
+            assert res['link'] == entry_obj.link
+            assert res['published_time'] == serializers.DateTimeField().to_representation(entry_obj.published_time)
+
+    def test_get_entry_detail(self, user, api_client):
+        # Setup DB: user subscribes to feed0, Not subscribes to feed1
+        feeds = _create_feeds_in_db(2)
+        user.subscriptions.add(feeds[0])
 
         # Test list one subscribed entries
-        entry = feeds[1].entries.first()
+        entry = feeds[0].entries.first()
         url = reverse("rssfeedapi:entry_detail", args=[entry.id])
         response = api_client.get(url)
         assert response.status_code == 200
-        assert response.json().get("link") == entry.link
+        response_json = response.json()
+        for key in ['title', 'link', 'description', 'author']:
+            assert getattr(entry, key) == response_json.get(key)
+        assert response_json.get("published_time") == \
+               serializers.DateTimeField().to_representation(entry.published_time)
+        # By default entry is not marked read
+        assert not response_json.get("read")
 
         # Test list one of not subscribed entries
-        entry = feeds[2].entries.first()
+        entry = feeds[1].entries.first()
         url = reverse("rssfeedapi:entry_detail", args=[entry.id])
         response = api_client.get(url)
         assert response.status_code == 404
 
-    def test_entries_filters(self, user, api_client):
+    def test_list_entries_filters(self, user, api_client):
         # Setup in DB: User subscribes to feed0 and feed1, but not feed2. User reads the first entry of feed.
         feeds = _create_feeds_in_db(3)
         user.subscriptions.add(feeds[0])
@@ -135,18 +160,15 @@ class TestEntryReadView:
         url = reverse("rssfeedapi:entry_read", args=[entry.id])
         response = api_client.post(url)
         assert response.status_code == 201
+        # Test Entry Detail Serializer 'read' field is set
+        assert response.json().get("read")
         assert user.read_entries.filter(id=entry.id).exists()
 
         # Test mark entry as read again
         response = api_client.post(url)
         assert response.status_code == 200
-        assert user.read_entries.filter(id=entry.id).exists()
-
-        # Test Entry Detail Serializer 'read' field is set
-        url = reverse("rssfeedapi:entry_detail", args=[entry.id])
-        response = api_client.get(url)
-        assert response.status_code == 200
         assert response.json().get("read")
+        assert user.read_entries.filter(id=entry.id).exists()
 
         # Test mark not subscribed entry as read
         feeds = _create_feeds_in_db(1)

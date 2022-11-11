@@ -23,10 +23,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY')
+SECRET_KEY = os.getenv('SECRET_KEY', 'random_generated')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', False) == 'True'
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = ["127.0.0.1",]
 
@@ -85,6 +85,9 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db' / 'db.sqlite3',
+        'OPTIONS': {
+            'timeout': 20,  # in seconds
+        }
     }
 }
 
@@ -211,6 +214,6 @@ LOGGING = {
     }
 }
 
-DAYS_RETRIEVABLE = int(os.getenv('DAYS_RETRIEVABLE'))
-MAXIMUM_RETRY = int(os.getenv('MAXIMUM_RETRY'))
-UPDATE_INTERVAL = float(os.getenv('UPDATE_INTERVAL'))  # Update feeds at background in seconds
+DAYS_RETRIEVABLE = int(os.getenv('DAYS_RETRIEVABLE', 7))
+MAXIMUM_RETRY = int(os.getenv('MAXIMUM_RETRY', 2))
+UPDATE_INTERVAL = float(os.getenv('UPDATE_INTERVAL', 1200))  # Update feeds at background in seconds

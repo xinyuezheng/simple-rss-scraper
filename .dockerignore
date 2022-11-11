@@ -1,5 +1,7 @@
-.gitignore
+.*
 rssfeed/logs/*
 rssfeed/tests
 db/*
-celerybeat-schedule.db
+rssfeed/celerybeat-schedule.db
+.coverage
+.pytest.ini
