@@ -54,9 +54,10 @@ def update_feed_entries(feed, parsed_dict):
 @app.task(retry_jitter=False, max_retries=MAXIMUM_RETRY,)
 def update_feed(feed_id):
     """
-    celery task to update a feed and its entries. Retry if any exception occurs.
-    After reaching maximum retries(2x), mark the feed status as 'Error' and send emails to all its subscribers.
-    Do not send email again if the feed was already in Error status.
+    Background task to update a feed and its entries. Retry if any exception occurs.
+    After reaching maximum retries, mark the feed status as 'Error' and send emails to all its subscribers.
+    Do not send email again if the feed was already in Error state. This is to prevent Emails sent to other
+     feed subscribers if one user manually updates an error feed which fails again.
     """
     feed = Feed.objects.get(id=feed_id)
     try:    # update all entries of the feed
@@ -66,28 +67,27 @@ def update_feed(feed_id):
 
         published_parsed = get_published_parsed(d.feed)
         if feed.published_time == published_parsed and feed.status == Feed.Status.UPDATED:
-            logger.info(f"Nothing to update: {feed.feed_url}")
+            logger.info(f"Nothing to update: {feed.title}")
             feed.last_updated = timezone.now()
             feed.save()
         else:
             update_error = update_feed_entries(feed, d)
             # indicate entry update error, trigger retry
             if update_error:
-                raise APIException(f"Update entries of feed {feed.feed_url} failed")
+                raise APIException(f"Update entries of feed {feed.title} failed")
             else:
                 feed.status = Feed.Status.UPDATED
                 feed.published_time = published_parsed
                 feed.last_updated = timezone.now()
                 feed.save()
-                logger.info(f'feed {feed.feed_url} is updated successfully')
+                logger.info(f'feed {feed.title} is updated successfully')
 
     except (APIException, ValidationError) as e:
         try:
-            logger.error(f'Update feed {feed.feed_url} failed with exception: {e}')
+            logger.error(f'Update feed {feed.title} failed with exception: {e}')
             raise update_feed.retry(countdown=2)
         except MaxRetriesExceededError:
-            logger.info("reach maximum retries, stop updating")
-            # update feed itself
+            logger.info(f"Maximum retries reached. Stop updating {feed.title}")
             send_email_flag = True
             if feed.status == Feed.Status.ERROR:    # If feed was already in ERROR state, do not send email again
                 send_email_flag = False
@@ -99,12 +99,12 @@ def update_feed(feed_id):
                 feed.published_time = published_parsed
             feed.last_updated = timezone.now()
             feed.save()
-            logger.error(f'feed {feed.feed_url} is updated with error')
+            logger.error(f'feed {feed.title} is updated with error')
 
             if send_email_flag:
                 email_list = feed.subscribers.values_list('email', flat=True)
                 for email in email_list:
-                    send_email(email, f"failed to update {feed.feed_url}")
+                    send_email(email, f"failed to update {feed.title}")
 
 
 @app.task

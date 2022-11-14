@@ -88,7 +88,7 @@ class FeedDetailView(RetrieveUpdateDestroyAPIView):
 
         return self.request.user.subscriptions.prefetch_related(
             Prefetch('entries',
-                     queryset=Entry.objects.filter(published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE))
+                     queryset=Entry.recent_objects.all()
                      )
         )
 
@@ -130,9 +130,8 @@ class EntryDetailView(RetrieveAPIView):
         if getattr(self, 'swagger_fake_view', False):
             return Entry.objects.none()
 
-        return Entry.objects.filter(
+        return Entry.recent_objects.filter(
             feed__in=self.request.user.subscriptions.values_list('id'),
-            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
         ).prefetch_related('read_by')
 
 
@@ -142,9 +141,8 @@ class EntryReadView(APIView):
                          responses={200: entry_read_200, 201: entry_read_201})
     def post(self, request, pk, **kargs):
         try:
-            entry = Entry.objects.get(
+            entry = Entry.recent_objects.get(
                 id=pk, feed__in=self.request.user.subscriptions.values_list('id'),
-                published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
             )
 
             if entry.read_by.filter(id=request.user.id).exists():
@@ -186,10 +184,9 @@ class EntryListView(ListAPIView):
             read = filter_serializer.validated_data.get('read', None)
             feed_id = filter_serializer.validated_data.get('feed_id', None)
 
-        entries = Entry.objects.filter(
+        entries = Entry.recent_objects.filter(
             feed__in=self.request.user.subscriptions.values_list('id'),
-            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
-        ).order_by('-published_time')
+        )
 
         if read:
             entries = entries.filter(read_by=self.request.user)

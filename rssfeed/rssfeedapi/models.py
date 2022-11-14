@@ -1,11 +1,14 @@
 import logging
+from datetime import timedelta
 
 import feedparser
 
 from django.db import models
+from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import ValidationError
 
+from rssfeed.settings import DAYS_RETRIEVABLE
 from .utils import get_published_parsed
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,12 @@ class ReadEntry(models.Model):
         verbose_name_plural = 'read entries'
 
 
+class RecentEntryManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(
+            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE))
+
+
 class Entry(models.Model):
     guid = models.CharField(max_length=256, unique=True, null=False)
     title = models.CharField(max_length=512, blank=True, null=True)
@@ -44,6 +53,8 @@ class Entry(models.Model):
     created_time = models.DateTimeField(auto_now_add=True)
     feed = models.ForeignKey('Feed', on_delete=models.CASCADE, related_name='entries')
     read_by = models.ManyToManyField('users.User', through=ReadEntry, related_name='read_entries')
+    objects = models.Manager()  # The default manager.
+    recent_objects = RecentEntryManager()
 
     class Meta:
         ordering = ('-published_time', )
@@ -55,17 +66,17 @@ class Entry(models.Model):
 
     @classmethod
     def get_or_create(cls, parsed_entry, feed_id):
-
         try:
             entry = cls.objects.get(guid=parsed_entry.get('id'))
             logger.info(f'Find Entry {entry.guid}: {entry.title} in DB')
         except cls.DoesNotExist:
             published_parsed = get_published_parsed(parsed_entry)
-            entry = cls.objects.create(guid=parsed_entry.get('id'), title=parsed_entry.get('title', ''),
-                                         link=parsed_entry.get('link', ''),
-                                         author=parsed_entry.get('author', ''),
-                                         description=parsed_entry.get('description', ''),
-                                         published_time=published_parsed, feed_id=feed_id)
+            entry = cls.objects.create(
+                guid=parsed_entry.get('id'), title=parsed_entry.get('title', ''),
+                link=parsed_entry.get('link', ''), author=parsed_entry.get('author', ''),
+                description=parsed_entry.get('description', ''), published_time=published_parsed,
+                feed_id=feed_id)
+
             logger.info(f'New Entry {entry.guid}: {entry.title} is created')
         return entry
 
@@ -86,7 +97,7 @@ class Feed(models.Model):
     subscribers = models.ManyToManyField('users.User', through=FeedSubscription, related_name='subscriptions')
 
     class Meta:
-        indexes = [models.Index(name="feed_url index", fields=["feed_url", ],)]
+        indexes = [models.Index(name="feed url index", fields=["feed_url", ],)]
 
     def __str__(self):
         return self.feed_url
@@ -99,8 +110,9 @@ class Feed(models.Model):
         except cls.DoesNotExist:
             d = feedparser.parse(feed_url)
             if d.get('bozo'):
-                raise ValidationError(f'rss feedparser failed: {d.get("bozo_exception")}',
-                                   code=status.HTTP_400_BAD_REQUEST)
+                raise ValidationError(
+                    f'Failed to parse feed: {d.get("bozo_exception")}', code=status.HTTP_400_BAD_REQUEST
+                )
 
             published_parsed = get_published_parsed(d.feed)
 

@@ -131,22 +131,22 @@ class TestEntryView:
         response = api_client.get(url+query_param)
         assert response.status_code == 400
 
-    def test_expired_entries_not_shown(self, feed, user, api_client):
-        # Setup in DB: user subscribes to feed. 1st entry in DB is older than DAYS_RETRIEVABLE days
+    def test_expired_entries(self, feed, user, api_client):
+        # Setup in DB: user subscribes to feed. 1st entry of the feed is older than DAYS_RETRIEVABLE days
         user.subscriptions.add(feed)
-        entry = feed.entries.first()
-        entry.published_time = timezone.now()-timedelta(days=DAYS_RETRIEVABLE+1)
-        entry.save()
+        old_entry = feed.entries.first()
+        old_entry.published_time = timezone.now()-timedelta(days=DAYS_RETRIEVABLE+1)
+        old_entry.save()
 
         url = reverse("rssfeedapi:entry_list")
         # Test old entry is not included in the Entry List
         response = api_client.get(url)
         assert response.json().get("count") == feed.entries.count() - 1
         for res in response.json()['results']:
-            assert res['id'] != entry.id
+            assert res['id'] != old_entry.id
 
         # Test old entry is not included in the Entry Detail
-        url = reverse("rssfeedapi:entry_detail", args=[entry.id])
+        url = reverse("rssfeedapi:entry_detail", args=[old_entry.id])
         response = api_client.get(url)
         assert response.status_code == 404
 
@@ -154,6 +154,11 @@ class TestEntryView:
         url = reverse("rssfeedapi:feed_detail", args=[feed.id])
         response = api_client.get(url)
         assert len(response.json().get("entries")) == feed.entries.count() - 1
+
+        # Test old entry is not able to mark as read anymore
+        url = reverse("rssfeedapi:entry_read", args=[old_entry.id])
+        response = api_client.post(url)
+        assert response.status_code == 404
 
 
 @pytest.mark.django_db

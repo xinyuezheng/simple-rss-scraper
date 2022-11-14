@@ -99,7 +99,7 @@ class TestFeedUpdate:
                 # Test the status of the feed is marked as ERROR
                 assert updated_feed.status == Feed.Status.ERROR
                 # Test notify user: Email is sent
-                mock_send_email.assert_called_with(user.email, f"failed to update {updated_feed.feed_url}")
+                mock_send_email.assert_called_with(user.email, f"failed to update {updated_feed.title}")
                 # Test Email is sent to all subscribers
                 assert mock_send_email.call_count == updated_feed.subscribers.count()
 
@@ -138,7 +138,7 @@ class TestFeedUpdate:
             with patch('rssfeedapi.tasks.update_feed_entries', mock_entry_update):
                 response = api_client.put(url)
                 assert response.status_code == 200
-                # Test
+                # Test Nothing to update "update_feed_entries" is not called
                 assert mock_entry_update.call_count == 0
 
     def test_force_update_successful(self, user, api_client, feed, celery_app):
