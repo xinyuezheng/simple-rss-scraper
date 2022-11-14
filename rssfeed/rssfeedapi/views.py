@@ -11,29 +11,31 @@ from django.views.decorators.vary import vary_on_headers
 from drf_yasg.utils import swagger_auto_schema, no_body
 
 from rest_framework import status
-from rest_framework.exceptions import APIException
 from rest_framework.generics import ListCreateAPIView, \
     ListAPIView, RetrieveAPIView, CreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from rssfeed.settings import DAYS_RETRIEVABLE
-from .swagger_utils import feed_subscribed_200, feed_subscribed_201, feed_param, read_param
+from .swagger_utils import feed_subscribed_200, feed_subscribed_201, feed_param, read_param, entry_read_200, \
+    entry_read_201
 from .tasks import update_feed
 
 from .serializers import FeedListSerializer, FeedDetailSerializer, EntryFilterSerializer, \
     EntryListSerializer, EntryDetailSerializer
-from .models import Entry, Feed, FeedSubscription, ReadEntry
+from .models import Entry, Feed, FeedSubscription
 logger = logging.getLogger(__name__)
 
 
 @method_decorator(name='get',
-                  decorator=[swagger_auto_schema(operation_summary="List all feeds followed by a user",),
+                  decorator=[swagger_auto_schema(
+                      operation_summary="List all feeds followed by a user, order by the subscribed date",),
                              cache_page(60*60*2),
                              vary_on_headers("Authorization",)])
 @method_decorator(name='post', decorator=swagger_auto_schema(
     operation_summary="User subscribes to a new feed",
-    operation_description="Add a feed to user's subscription list. Create a new feed if not exists",
+    operation_description="Add a feed to user's subscription list. "
+                          "Create a new feed in the database if not exists",
     responses={200: feed_subscribed_200, 201: feed_subscribed_201, 400: 'rss feedparser error'},
 ))
 class FeedListVew(ListCreateAPIView):
@@ -64,10 +66,11 @@ class FeedListVew(ListCreateAPIView):
 
 
 @method_decorator(name='get', decorator=swagger_auto_schema(
-    operation_summary=f"Show one followed feed content. Only show entries published in recent {DAYS_RETRIEVABLE} days",
+    operation_summary=f"Show one followed feed details. "
+                      f"Only include entries published in recent {DAYS_RETRIEVABLE} days of the feed",
 ))
 @method_decorator(name='put', decorator=swagger_auto_schema(
-    operation_summary="Update one feed",
+    operation_summary="User manually updates the feed",
     request_body=no_body,
     responses={200: "Feed will be updated at background"}
 ))
@@ -113,14 +116,14 @@ class FeedDetailView(RetrieveUpdateDestroyAPIView):
 @method_decorator(
     name='get',
     decorator=swagger_auto_schema(
-        operation_summary=f"Show one followed entry details. Only published in recent {DAYS_RETRIEVABLE} days",),
+        operation_summary=f"Get details of an entry which was published in recent {DAYS_RETRIEVABLE} days ",),
 )
 class EntryDetailView(RetrieveAPIView):
     serializer_class = EntryDetailSerializer
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-        context.update({"username": self.request.user.username})
+        context.update({"user": self.request.user})
         return context
 
     def get_queryset(self):
@@ -134,30 +137,36 @@ class EntryDetailView(RetrieveAPIView):
 
 
 class EntryReadView(APIView):
-    @swagger_auto_schema(operation_summary=f"Mark an entry as read. Only published in recent {DAYS_RETRIEVABLE} days",
+    @swagger_auto_schema(operation_summary=f"Mark one entry published in recent {DAYS_RETRIEVABLE} days as read",
                          request_body=no_body,
-                         responses={200: EntryDetailSerializer, 201: EntryDetailSerializer})
+                         responses={200: entry_read_200, 201: entry_read_201})
     def post(self, request, pk, **kargs):
-        entry = Entry.objects.filter(id=pk, feed__in=self.request.user.subscriptions.values_list('id')).first()
-        if not entry:
+        try:
+            entry = Entry.objects.get(
+                id=pk, feed__in=self.request.user.subscriptions.values_list('id'),
+                published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
+            )
+
+            if entry.read_by.filter(id=request.user.id).exists():
+                return_status = status.HTTP_200_OK
+            else:
+                entry.read_by.add(request.user)
+                return_status = status.HTTP_201_CREATED
+
+            entry_serializer = EntryDetailSerializer(entry,
+                                                     context={'request': request, 'user': request.user})
+            return Response(entry_serializer.data, status=return_status)
+
+        except Entry.DoesNotExist:
             raise Http404
-
-        if request.user.read_entries.filter(id=entry.id).exists():
-            return_status = status.HTTP_200_OK
-        else:
-            request.user.read_entries.add(entry)
-            return_status = status.HTTP_201_CREATED
-
-        entry_serializer = EntryDetailSerializer(entry,
-                                                 context={'request': request, 'username': self.request.user.username})
-        return Response(entry_serializer.data, status=return_status)
 
 
 @method_decorator(
     name='get',
     decorator=[
         swagger_auto_schema(
-                operation_summary=f"List followed entries. Only published in recent {DAYS_RETRIEVABLE} days",
+                operation_summary=f"List followed entries published in recent {DAYS_RETRIEVABLE} days, order by "
+                                  f"the published date",
                 operation_description="'feed_id': Filter entries per feed. 'read': Filter read/unread entries. "
                                       "Combine those to filter read/unread entries globally or per feed",
                 manual_parameters=[feed_param, read_param],),
@@ -177,17 +186,18 @@ class EntryListView(ListAPIView):
             read = filter_serializer.validated_data.get('read', None)
             feed_id = filter_serializer.validated_data.get('feed_id', None)
 
-        if read is None:
-            entries = Entry.objects.filter(feed__in=self.request.user.subscriptions.values_list('id'))
-        elif read:  # read==True
-            entries = self.request.user.read_entries.filter(feed__in=self.request.user.subscriptions.values_list('id'))
-        else:  # read==False
-            entries = Entry.objects.filter(feed__in=self.request.user.subscriptions.values_list('id'))\
-                .exclude(id__in=self.request.user.read_entries.values_list('id'))
+        entries = Entry.objects.filter(
+            feed__in=self.request.user.subscriptions.values_list('id'),
+            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
+        ).order_by('-published_time')
+
+        if read:
+            entries = entries.filter(read_by=self.request.user)
+
+        if read == False:  # Explicit False, Not None
+            entries = entries.exclude(read_by=self.request.user)
 
         if feed_id:
             entries = entries.filter(feed_id=feed_id)
 
-        return entries.filter(
-            published_time__gte=timezone.now()-timedelta(days=DAYS_RETRIEVABLE)
-        ).order_by('-published_time')
+        return entries

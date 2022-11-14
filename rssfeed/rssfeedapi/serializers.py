@@ -15,9 +15,9 @@ class EntryDetailSerializer(serializers.HyperlinkedModelSerializer):
 
     def _is_read(self, entry_obj) -> bool:
         is_read = False
-        username = self.context.get("username")
-        if username:
-            is_read = entry_obj.read_by.filter(username=username).exists()
+        user = self.context.get("user")
+        if user:
+            is_read = entry_obj.read_by.filter(id=user.id).exists()
         return is_read
 
     class Meta:

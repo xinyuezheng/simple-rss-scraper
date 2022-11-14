@@ -115,14 +115,18 @@ class TestFeedView:
         assert response.status_code == 404
 
     def test_unsubscribe_feed(self, user, api_client, feed):
-        # Setup DB: user subscribes to feed
+        # Setup DB: user subscribes to feed, all entries of the feed are read by the user
         user.subscriptions.add(feed)
+        for entry in feed.entries.all():
+            user.read_entries.add(entry)
 
         url = reverse("rssfeedapi:feed_detail", args=[feed.id])
         # Test unsubscribe to a feed
         response = api_client.delete(url)
         assert response.status_code == 204
         assert not user.subscriptions.filter(feed_url=feed.feed_url).exists()
+        # Test all marked read entries have been cleared
+        assert not user.read_entries.filter(feed=feed).exists()
 
         # Test unsubscribe to a non-existing feed
         url = reverse("rssfeedapi:feed_detail", args=[100])

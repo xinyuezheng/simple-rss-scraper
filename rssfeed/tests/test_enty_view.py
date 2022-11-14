@@ -66,7 +66,7 @@ class TestEntryView:
         assert response.status_code == 404
 
     def test_list_entries_filters(self, user, api_client):
-        # Setup in DB: User subscribes to feed0 and feed1, but not feed2. User reads the first entry of feed.
+        # Setup in DB: User subscribes to feed0 and feed1, but not feed2. User reads the first entry of feed0.
         feeds = _create_feeds_in_db(3)
         user.subscriptions.add(feeds[0])
         user.subscriptions.add(feeds[1])
