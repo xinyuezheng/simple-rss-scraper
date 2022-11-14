@@ -84,10 +84,10 @@ def update_feed(feed_id):
 
     except (APIException, ValidationError) as e:
         try:
-            logger.error(f'Update feed {feed.title} failed with exception: {e}')
+            logger.warning(f'Update feed {feed.title} failed with exception: {e}')
             raise update_feed.retry(countdown=2)
         except MaxRetriesExceededError:
-            logger.info(f"Maximum retries reached. Stop updating {feed.title}")
+            logger.error(f"Maximum retries reached. Stop updating {feed.title}")
             send_email_flag = True
             if feed.status == Feed.Status.ERROR:    # If feed was already in ERROR state, do not send email again
                 send_email_flag = False
@@ -99,7 +99,6 @@ def update_feed(feed_id):
                 feed.published_time = published_parsed
             feed.last_updated = timezone.now()
             feed.save()
-            logger.error(f'feed {feed.title} is updated with error')
 
             if send_email_flag:
                 email_list = feed.subscribers.values_list('email', flat=True)

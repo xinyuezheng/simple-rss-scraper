@@ -4,4 +4,5 @@ rssfeed/tests
 db/*
 rssfeed/celerybeat-schedule.db
 .coverage
-.pytest.ini
+rssfeed/.pytest_cache
+pytest.ini

@@ -195,7 +195,7 @@ LOGGING = {
             'formatter': 'verbose',
         },
         'file': {
-            'level': 'INFO',
+            'level': 'DEBUG',
             'class': 'logging.FileHandler',
             'filename': 'logs/rssfeed.log',
             'formatter': 'verbose',

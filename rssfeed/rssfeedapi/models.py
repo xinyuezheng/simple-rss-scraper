@@ -68,7 +68,7 @@ class Entry(models.Model):
     def get_or_create(cls, parsed_entry, feed_id):
         try:
             entry = cls.objects.get(guid=parsed_entry.get('id'))
-            logger.info(f'Find Entry {entry.guid}: {entry.title} in DB')
+            logger.debug(f'Find Entry {entry.guid}: {entry.title} in DB')
         except cls.DoesNotExist:
             published_parsed = get_published_parsed(parsed_entry)
             entry = cls.objects.create(
@@ -77,7 +77,7 @@ class Entry(models.Model):
                 description=parsed_entry.get('description', ''), published_time=published_parsed,
                 feed_id=feed_id)
 
-            logger.info(f'New Entry {entry.guid}: {entry.title} is created')
+            logger.debug(f'New Entry {entry.guid}: {entry.title} is created')
         return entry
 
 
@@ -106,7 +106,7 @@ class Feed(models.Model):
     def get_or_create(cls, feed_url):
         try:
             feed = cls.objects.get(feed_url=feed_url)
-            logger.info(f'Find Feed: {feed.feed_url} in DB')
+            logger.debug(f'Find Feed: {feed.feed_url} in DB')
         except cls.DoesNotExist:
             d = feedparser.parse(feed_url)
             if d.get('bozo'):
