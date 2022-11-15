@@ -1,78 +1,28 @@
 import logging
+from time import sleep
 
 import feedparser
 from celery import group
-from django.db import transaction
 from django.db.models import Count
-from django.utils import timezone
 from rest_framework.exceptions import APIException, ValidationError
-
 from rssfeed.settings import MAXIMUM_RETRY, UPDATE_INTERVAL
-from .models import Feed, Entry
+from .models import Feed
 from celery.exceptions import MaxRetriesExceededError
-
 from rssfeed.celery import app
-
 from .utils import get_published_parsed
 
 logger = logging.getLogger(__name__)
 
 
 def send_email(email, msg):
-    '''
+    """
     Simulate send email
-    :param email: email address
-    :param msg: message
-    :return: None
-    '''
+    """
     logger.info(f'send email to {email}: {msg}')
 
 
-def update_feed_entries(feed_url, parsed_entries_list, published_parsed):
-    """
-    #TODO :
-    Helper function to update all entries of a feed. If error occurs on one entry update, roll back the transaction
-    and continue update for other entries.
-    :param feed_url:
-    :param parsed_entries_list: parsed dictionary returned from feedparser.parse()
-    :return:
-    """
-    failed_entries_list = []
-    feed = Feed.objects.get(feed_url=feed_url)
-    if feed.published_time == published_parsed and feed.status == Feed.Status.UPDATED:
-        logger.info(f"Nothing to update: {feed.title}")
-        return failed_entries_list
-
-    for entry in parsed_entries_list:  # make a new list for iteration
-        # continue update other entries if one or more entries update fails
-        try:
-            with transaction.atomic():
-                Entry.get_or_create(parsed_entry=entry, feed_id=feed.id)
-        except Exception as e:
-            failed_entries_list.append(entry)
-            logger.error(e)
-
-    return failed_entries_list
-
-
-def process_feed_new_status(feed_url, feed_status, published_parsed):
-    """
-    This function updates the status of feed in the database. Use 'select_for_update' to block the
-    row until the transaction is finished, to prevent other processes to change the status of the feed at the same time
-    """
-    feed = Feed.objects.select_for_update().get(feed_url=feed_url)
-    with transaction.atomic():
-        old_status = feed.status
-        feed.last_updated = timezone.now()
-        feed.status = feed_status
-        if published_parsed:
-            feed.published_time = published_parsed
-        feed.save()
-
-    if old_status == Feed.Status.UPDATED and feed_status == Feed.Status.ERROR:
-        email_list = feed.subscribers.values_list('email', flat=True)
-        for email_addr in email_list:
-            send_email(email_addr, f"failed to update {feed.title}")
+def send_admin_email(msg):
+    send_email(email='admin@api.com', msg=msg)
 
 
 @app.task(retry_jitter=False, max_retries=MAXIMUM_RETRY,)
@@ -89,14 +39,15 @@ def update_feed(feed_url):
             raise ValidationError(f'rss feedparser failed: {d.get("bozo_exception")}')
         published_parsed = get_published_parsed(d.feed)
 
-        parsed_entries = d.entries
-        failed_entries_list = update_feed_entries(
-            feed_url=feed_url, parsed_entries_list=parsed_entries, published_parsed=published_parsed)
+        feed = Feed.objects.get(feed_url=feed_url)
+        failed_entries_list = feed.update_entries(
+            parsed_entries_list=d.entries, published_parsed=published_parsed)
 
         for i in range(MAXIMUM_RETRY):  # retry failed entries if any
             if len(failed_entries_list):
-                failed_entries_list = update_feed_entries(
-                    feed_url=feed_url, parsed_entries_list=parsed_entries, published_parsed=published_parsed)
+                sleep(2)  # countdown 2s and retry
+                failed_entries_list = feed.update_entries(
+                     parsed_entries_list=d.entries, published_parsed=published_parsed)
             else:
                 break
 
@@ -104,21 +55,33 @@ def update_feed(feed_url):
             failed_entries_guid = ''
             for entry_guid in failed_entries_list:
                 failed_entries_guid += f'{entry_guid.get("id", "")},'
-            logger.error(f"Failed to update entries {failed_entries_guid}")
-            process_feed_new_status(
-                feed_url=feed_url, feed_status=Feed.Status.ERROR, published_parsed=published_parsed)
-        else:
-            process_feed_new_status(
-                feed_url=feed_url, feed_status=Feed.Status.UPDATED, published_parsed=published_parsed)
+            err_msg = f"Failed to update entries {failed_entries_guid}"
+            logger.error(err_msg)
+            # Notify admin.
+            send_admin_email(msg=err_msg)
 
+        # Continue update the feed in the future, regardless of the results of updating entries
+        feed.update_status(
+            feed_status=Feed.Status.UPDATED, published_parsed=published_parsed)
     except (ValidationError, APIException) as e:
         try:
             logger.warning(f'Parse {feed_url} failed with exception: {e}')
             raise update_feed.retry(countdown=2)
         except MaxRetriesExceededError:
             logger.error(f"Maximum retries reached. Stop updating {feed_url}")
-            process_feed_new_status(
-                feed_url=feed_url, feed_status=Feed.Status.ERROR, published_parsed=None)
+            feed = Feed.objects.get(feed_url=feed_url)
+            old_status = feed.update_status(
+                feed_status=Feed.Status.ERROR, published_parsed=None)
+
+            if old_status == Feed.Status.UPDATED:
+                # Notify admin
+                err_msg = f"failed to update {feed.title}"
+                send_admin_email(msg=err_msg)
+
+                # Also notify subscribers??
+                email_list = feed.subscribers.values_list('email', flat=True)
+                for email_addr in email_list:
+                    send_email(email=email_addr, msg=err_msg)
 
 
 @app.task
@@ -136,6 +99,4 @@ def update_active_feeds():
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):
     sender.add_periodic_task(UPDATE_INTERVAL, update_active_feeds.s(), name='update active feeds')
-
-
 

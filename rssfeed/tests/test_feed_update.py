@@ -8,7 +8,6 @@ from rest_framework.reverse import reverse
 
 from rssfeed.settings import MAXIMUM_RETRY
 from rssfeedapi.models import Feed
-from rssfeedapi.tasks import update_feed_entries
 from rssfeedapi.utils import get_published_parsed
 
 
@@ -43,15 +42,20 @@ class TestFeedUpdate:
         url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
         d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/NotValid.xml')
         mock_feedparser = MagicMock(return_value=d)
+        mock_send_admin_email = MagicMock()
         with patch('feedparser.parse', mock_feedparser):
-            response = api_client.put(url)
-            assert response.status_code == 200
-            assert mock_feedparser.call_count == 1 + MAXIMUM_RETRY  # First time failed + Maximum Retry reached
-            updated_feed = Feed.objects.get(id=feed.id)
-            assert updated_feed.status == Feed.Status.ERROR
-            assert updated_feed.last_updated > feed.last_updated
-            # published time stays the same because it cannot be parsed
-            assert updated_feed.published_time == feed.published_time
+            with patch('rssfeedapi.tasks.send_admin_email', mock_send_admin_email):
+                response = api_client.put(url)
+                assert response.status_code == 200
+                assert mock_feedparser.call_count == 1 + MAXIMUM_RETRY  # First time failed + Maximum Retry reached
+                updated_feed = Feed.objects.get(id=feed.id)
+                assert updated_feed.status == Feed.Status.ERROR
+                assert updated_feed.last_updated > feed.last_updated
+                # published time stays the same because it cannot be parsed
+                assert updated_feed.published_time == feed.published_time
+
+                # Test notify admin: Email is sent
+                mock_send_admin_email.call_count == 1
 
     def test_update_entries_with_exception(self, user, api_client, feed, celery_app):
         num_old_entries = feed.entries.count()
@@ -59,8 +63,8 @@ class TestFeedUpdate:
         d.entries[0]['id'] = None  # Simulate one entry has error
         published_parsed = get_published_parsed(d.feed)
         with patch('feedparser.parse', return_value=d):
-            faild_entreis_list = update_feed_entries(
-                feed_url=feed.feed_url, parsed_entries_list=d.entries, published_parsed=published_parsed)
+            faild_entreis_list = feed.update_entries(
+                parsed_entries_list=d.entries, published_parsed=published_parsed)
             assert d.entries[0] in faild_entreis_list
             updated_feed = Feed.objects.get(id=feed.id)
             # 1 less entry added to DB due to the update error
@@ -73,16 +77,23 @@ class TestFeedUpdate:
 
         d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
         mock_entries_update = MagicMock(return_value=[d.entries[0]])
+        mock_send_admin_email = MagicMock()
+
         with patch('feedparser.parse', return_value=d):
-            with patch('rssfeedapi.tasks.update_feed_entries', mock_entries_update):
-                response = api_client.put(url)
-                assert response.status_code == 200
-                assert mock_entries_update.call_count == 1 + MAXIMUM_RETRY  # First time failed + Maximum Retry reached
-                updated_feed = Feed.objects.get(id=feed.id)
-                published_parsed = get_published_parsed(d.feed)
-                assert updated_feed.published_time == published_parsed
-                assert updated_feed.status == Feed.Status.ERROR
-                assert updated_feed.last_updated > feed.last_updated
+            with patch('rssfeedapi.models.Feed.update_entries', mock_entries_update):
+                with patch('rssfeedapi.tasks.send_admin_email', mock_send_admin_email):
+                    response = api_client.put(url)
+                    assert response.status_code == 200
+                    # First time failed + Maximum Retry reached
+                    assert mock_entries_update.call_count == 1 + MAXIMUM_RETRY
+                    updated_feed = Feed.objects.get(id=feed.id)
+                    published_parsed = get_published_parsed(d.feed)
+                    assert updated_feed.published_time == published_parsed
+                    assert updated_feed.status == Feed.Status.UPDATED
+                    assert updated_feed.last_updated > feed.last_updated
+
+                    # Test notify admin: Email is sent
+                    mock_send_admin_email.assert_called_with(msg=f"Failed to update entries {d.entries[0]['id']},")
 
     def test_entry_update_retry_successful(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed
@@ -93,35 +104,21 @@ class TestFeedUpdate:
         d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
         # Simulate update entry: first time one entry with error, second time no error
         mock_feed_update = MagicMock(side_effect=[[d.entries[0]], []])
-        with patch('feedparser.parse', return_value=d):
-            with patch('rssfeedapi.tasks.update_feed_entries', mock_feed_update):
-                response = api_client.put(url)
-                assert response.status_code == 200
-                assert mock_feed_update.call_count == 2
-                updated_feed = Feed.objects.get(id=feed.id)
-                published_parsed = get_published_parsed(d.feed)
-                assert updated_feed.published_time == published_parsed
-                assert updated_feed.status == Feed.Status.UPDATED
-                assert updated_feed.last_updated > feed.last_updated
+        mock_send_admin_email = MagicMock()
 
-    def test_notify_user(self, user, api_client, feed, celery_app):
-        # Set up in DB: user subscribe to feed
-        user.subscriptions.add(feed)
-
-        url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
-        d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml.NotExist')
-        mock_send_email = MagicMock()
         with patch('feedparser.parse', return_value=d):
-            with patch('rssfeedapi.tasks.send_email', mock_send_email):
-                response = api_client.put(url)
-                assert response.status_code == 200
-                updated_feed = Feed.objects.get(id=feed.id)
-                # Test the status of the feed is marked as ERROR
-                assert updated_feed.status == Feed.Status.ERROR
-                # Test notify user: Email is sent
-                mock_send_email.assert_called_with(user.email, f"failed to update {updated_feed.title}")
-                # Test Email is sent to all subscribers
-                assert mock_send_email.call_count == updated_feed.subscribers.count()
+            with patch('rssfeedapi.models.Feed.update_entries', mock_feed_update):
+                with patch('rssfeedapi.tasks.send_admin_email', mock_send_admin_email):
+                    response = api_client.put(url)
+                    assert response.status_code == 200
+                    assert mock_feed_update.call_count == 2
+                    updated_feed = Feed.objects.get(id=feed.id)
+                    published_parsed = get_published_parsed(d.feed)
+                    assert updated_feed.published_time == published_parsed
+                    assert updated_feed.status == Feed.Status.UPDATED
+                    assert updated_feed.last_updated > feed.last_updated
+                    # No email is sent
+                    mock_send_admin_email.call_count == 0
 
     def test_do_not_spam(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed, feed is already in Error state from previous update
@@ -130,17 +127,12 @@ class TestFeedUpdate:
         feed.save()
 
         url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
-        d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml.NotExist')
-        mock_send_email = MagicMock()
-        with patch('feedparser.parse', return_value=d):
-            with patch('rssfeedapi.tasks.send_email', mock_send_email):
-                response = api_client.put(url)
-                assert response.status_code == 200
-                updated_feed = Feed.objects.get(id=feed.id)
-                # Test the status of the feed is marked as ERROR
-                assert updated_feed.status == Feed.Status.ERROR
-                # Test Don't send Email
-                assert mock_send_email.call_count == 0
+        mock_send_admin_email = MagicMock()
+        with patch('rssfeedapi.tasks.send_admin_email', mock_send_admin_email):
+            response = api_client.put(url)
+            assert response.status_code == 200
+            # Test Don't send Email
+            assert mock_send_admin_email.call_count == 0
 
     def test_nothing_to_update(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed

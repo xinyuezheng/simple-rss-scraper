@@ -3,10 +3,10 @@ from datetime import timedelta
 
 import feedparser
 
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, APIException
 
 from rssfeed.settings import DAYS_RETRIEVABLE
 from .utils import get_published_parsed
@@ -118,9 +118,66 @@ class Feed(models.Model):
 
             feed = cls.objects.create(feed_url=feed_url, title=d.feed.get('title', ''), link=d.feed.get('link', ''),
                                       description=d.feed.get('description', ''), language=d.feed.get('language', ''),
-                                      published_time=published_parsed)
-            logger.info(f'New Feed: {feed.feed_url} created')
-            for entry in d.entries:
-                Entry.get_or_create(parsed_entry=entry, feed_id=feed.id)
+                                      )
 
+            failed_entries_list = feed.update_entries(
+                parsed_entries_list=d.entries, published_parsed=published_parsed)
+
+            feed.update_status(feed_status=Feed.Status.UPDATED, published_parsed=published_parsed)
+
+            if len(failed_entries_list):
+                failed_entries_guid = ''
+                for entry_guid in failed_entries_list:
+                    failed_entries_guid += f'{entry_guid.get("id", "")},'
+                err_msg = f"Failed to create entries {failed_entries_guid} of {feed.feed_url}"
+                logger.error(err_msg)
+
+            logger.info(f'New Feed: {feed.feed_url} created')
         return feed
+
+    def update_entries(self, parsed_entries_list, published_parsed):
+        """
+        create/update entries of a feed. If error occurs on one entry, roll back the transaction
+        and continue for other entries.
+        :param parsed_entries_list: parsed entries list from 'feedparser.parser()' (d.entreis)
+        :param published_parsed: feed published time from 'feedparser.parse()' (d.published_parsed or d.updated_parsed)
+        :return: a list of failed entries
+        """
+        failed_entries_list = []
+        if self.published_time == published_parsed and self.status == Feed.Status.UPDATED:
+            logger.info(f"Nothing to update: {self.title}")
+            return failed_entries_list
+
+        for entry in parsed_entries_list:  # make a new list for iteration
+            # continue update other entries if one or more entries update fails
+            try:
+                with transaction.atomic():
+                    Entry.get_or_create(parsed_entry=entry, feed_id=self.id)
+            except Exception as e:
+                failed_entries_list.append(entry)
+                logger.error(e)
+
+        return failed_entries_list
+
+    def get_queryset(self):
+        return self.__class__.objects.filter(id=self.id)
+
+    def update_status(self, feed_status, published_parsed):
+        """
+        Updates the status of feed in the database. Use 'select_for_update' to lock the
+        row until the transaction is committed, to avoid the problem of concurrency
+        :param feed_status: status to be updated
+        :param published_parsed: feed published time from 'feedparser.parse()' (d.published_parsed or d.updated_parsed)
+        :return: current feed status
+        """
+        #  Operating on the self object will not work since it has already been fetched
+        new_feed = self.get_queryset().select_for_update().get()
+        with transaction.atomic():
+            old_status = new_feed.status
+            new_feed.last_updated = timezone.now()
+            new_feed.status = feed_status
+            if published_parsed:
+                new_feed.published_time = published_parsed
+            new_feed.save()
+
+        return old_status
