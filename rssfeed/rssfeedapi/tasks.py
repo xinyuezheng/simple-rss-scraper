@@ -37,20 +37,22 @@ def update_feed_entries(feed_url, parsed_entries_list, published_parsed):
     :param parsed_entries_list: parsed dictionary returned from feedparser.parse()
     :return:
     """
+    failed_entries_list = []
     feed = Feed.objects.get(feed_url=feed_url)
     if feed.published_time == published_parsed and feed.status == Feed.Status.UPDATED:
         logger.info(f"Nothing to update: {feed.title}")
-        parsed_entries_list.clear()
-        return
+        return failed_entries_list
 
-    for entry in list(parsed_entries_list):  # make a new list for iteration
+    for entry in parsed_entries_list:  # make a new list for iteration
         # continue update other entries if one or more entries update fails
         try:
             with transaction.atomic():
                 Entry.get_or_create(parsed_entry=entry, feed_id=feed.id)
-                parsed_entries_list.remove(entry)
         except Exception as e:
+            failed_entries_list.append(entry)
             logger.error(e)
+
+    return failed_entries_list
 
 
 def process_feed_new_status(feed_url, feed_status, published_parsed):
@@ -88,22 +90,26 @@ def update_feed(feed_url):
         published_parsed = get_published_parsed(d.feed)
 
         parsed_entries = d.entries
-        update_feed_entries(feed_url, parsed_entries, published_parsed)
+        failed_entries_list = update_feed_entries(
+            feed_url=feed_url, parsed_entries_list=parsed_entries, published_parsed=published_parsed)
 
         for i in range(MAXIMUM_RETRY):  # retry failed entries if any
-            if len(parsed_entries):
-                update_feed_entries(feed_url, parsed_entries, published_parsed)
+            if len(failed_entries_list):
+                failed_entries_list = update_feed_entries(
+                    feed_url=feed_url, parsed_entries_list=parsed_entries, published_parsed=published_parsed)
             else:
                 break
 
-        if len(parsed_entries):
+        if len(failed_entries_list):
             failed_entries_guid = ''
-            for entry_guid in parsed_entries:
+            for entry_guid in failed_entries_list:
                 failed_entries_guid += f'{entry_guid.get("id", "")},'
             logger.error(f"Failed to update entries {failed_entries_guid}")
-            process_feed_new_status(feed_url, Feed.Status.ERROR, published_parsed)
+            process_feed_new_status(
+                feed_url=feed_url, feed_status=Feed.Status.ERROR, published_parsed=published_parsed)
         else:
-            process_feed_new_status(feed_url, Feed.Status.UPDATED, published_parsed)
+            process_feed_new_status(
+                feed_url=feed_url, feed_status=Feed.Status.UPDATED, published_parsed=published_parsed)
 
     except (ValidationError, APIException) as e:
         try:
@@ -111,7 +117,8 @@ def update_feed(feed_url):
             raise update_feed.retry(countdown=2)
         except MaxRetriesExceededError:
             logger.error(f"Maximum retries reached. Stop updating {feed_url}")
-            process_feed_new_status(feed_url, Feed.Status.ERROR, None)
+            process_feed_new_status(
+                feed_url=feed_url, feed_status=Feed.Status.ERROR, published_parsed=None)
 
 
 @app.task

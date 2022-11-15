@@ -8,6 +8,7 @@ from rest_framework.reverse import reverse
 
 from rssfeed.settings import MAXIMUM_RETRY
 from rssfeedapi.models import Feed
+from rssfeedapi.tasks import update_feed_entries
 from rssfeedapi.utils import get_published_parsed
 
 
@@ -27,6 +28,7 @@ class TestFeedUpdate:
             published_parsed = get_published_parsed(d.feed)
             assert updated_feed.published_time == published_parsed
             assert updated_feed.status == Feed.Status.UPDATED
+            assert updated_feed.last_updated > feed.last_updated
 
             # Test all entries are created
             for entry in d.entries:
@@ -34,55 +36,73 @@ class TestFeedUpdate:
 
             assert updated_feed.entries.count() == num_old_entries + len(d.entries)
 
-    def test_after_retry_failed(self, user, api_client, feed, celery_app):
+    def test_parse_feed_failed(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed
         user.subscriptions.add(feed)
 
         url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
+        d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/NotValid.xml')
+        mock_feedparser = MagicMock(return_value=d)
+        with patch('feedparser.parse', mock_feedparser):
+            response = api_client.put(url)
+            assert response.status_code == 200
+            assert mock_feedparser.call_count == 1 + MAXIMUM_RETRY  # First time failed + Maximum Retry reached
+            updated_feed = Feed.objects.get(id=feed.id)
+            assert updated_feed.status == Feed.Status.ERROR
+            assert updated_feed.last_updated > feed.last_updated
+            # published time stays the same because it cannot be parsed
+            assert updated_feed.published_time == feed.published_time
 
-        # Test tasks are executed 3 times. (including 2x retry)
-        mock_entries_update = MagicMock(return_value=True)
+    def test_update_entries_with_exception(self, user, api_client, feed, celery_app):
+        num_old_entries = feed.entries.count()
         d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
+        d.entries[0]['id'] = None  # Simulate one entry has error
+        published_parsed = get_published_parsed(d.feed)
+        with patch('feedparser.parse', return_value=d):
+            faild_entreis_list = update_feed_entries(
+                feed_url=feed.feed_url, parsed_entries_list=d.entries, published_parsed=published_parsed)
+            assert d.entries[0] in faild_entreis_list
+            updated_feed = Feed.objects.get(id=feed.id)
+            # 1 less entry added to DB due to the update error
+            assert updated_feed.entries.count() == num_old_entries + len(d.entries) - 1
+
+    def test_entry_update_retry_failed(self, user, api_client, feed, celery_app):
+        # Set up in DB: user subscribe to feed
+        user.subscriptions.add(feed)
+        url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
+
+        d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
+        mock_entries_update = MagicMock(return_value=[d.entries[0]])
         with patch('feedparser.parse', return_value=d):
             with patch('rssfeedapi.tasks.update_feed_entries', mock_entries_update):
                 response = api_client.put(url)
                 assert response.status_code == 200
-                assert mock_entries_update.call_count == 1 + MAXIMUM_RETRY
+                assert mock_entries_update.call_count == 1 + MAXIMUM_RETRY  # First time failed + Maximum Retry reached
                 updated_feed = Feed.objects.get(id=feed.id)
+                published_parsed = get_published_parsed(d.feed)
+                assert updated_feed.published_time == published_parsed
                 assert updated_feed.status == Feed.Status.ERROR
+                assert updated_feed.last_updated > feed.last_updated
 
-    def test_after_retry_successful(self, user, api_client, feed, celery_app):
+    def test_entry_update_retry_successful(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed
         user.subscriptions.add(feed)
 
         url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
 
         d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
-        # Simulate update entry: first time failed, second time is successful
-        mock_feed_update = MagicMock(side_effect=[True, False])
+        # Simulate update entry: first time one entry with error, second time no error
+        mock_feed_update = MagicMock(side_effect=[[d.entries[0]], []])
         with patch('feedparser.parse', return_value=d):
             with patch('rssfeedapi.tasks.update_feed_entries', mock_feed_update):
                 response = api_client.put(url)
                 assert response.status_code == 200
                 assert mock_feed_update.call_count == 2
                 updated_feed = Feed.objects.get(id=feed.id)
+                published_parsed = get_published_parsed(d.feed)
+                assert updated_feed.published_time == published_parsed
                 assert updated_feed.status == Feed.Status.UPDATED
-
-    def test_one_entry_update_failed(self, user, api_client, feed, celery_app):
-        # Set up in DB: user subscribe to feed
-        user.subscriptions.add(feed)
-        num_old_entries = feed.entries.count()
-
-        url = reverse("rssfeedapi:feed_detail",  args=[feed.id])
-        d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
-        d.entries[2]['id'] = None  # Simulate one entry update fails
-        with patch('feedparser.parse', return_value=d):
-            response = api_client.put(url)
-            assert response.status_code == 200
-            updated_feed = Feed.objects.get(id=feed.id)
-            assert updated_feed.status == Feed.Status.ERROR
-            # 1 less entry added due to the update error
-            assert updated_feed.entries.count() == num_old_entries + len(d.entries) - 1
+                assert updated_feed.last_updated > feed.last_updated
 
     def test_notify_user(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed
@@ -133,15 +153,15 @@ class TestFeedUpdate:
         feed.published_time = publish_parsed
         feed.save()
 
-        mock_entry_update = MagicMock()
+        mock_create_entry = MagicMock()
         with patch('feedparser.parse', return_value=d):
-            with patch('rssfeedapi.tasks.update_feed_entries', mock_entry_update):
+            with patch('rssfeedapi.models.Entry.get_or_create', mock_create_entry):
                 response = api_client.put(url)
                 assert response.status_code == 200
-                # Test Nothing to update "update_feed_entries" is not called
-                assert mock_entry_update.call_count == 0
+                # Test Nothing to update "Entry.get_or_create" is not called
+                assert mock_create_entry.call_count == 0
 
-    def test_force_update_successful(self, user, api_client, feed, celery_app):
+    def test_force_update_from_error_state(self, user, api_client, feed, celery_app):
         # Set up in DB: user subscribe to feed. feed is recently updated but in Error state, user try to update it again
         user.subscriptions.add(feed)
         feed.status = Feed.Status.ERROR
@@ -160,6 +180,7 @@ class TestFeedUpdate:
             published_parsed = get_published_parsed(d.feed)
             assert updated_feed.published_time == published_parsed
             assert updated_feed.status == Feed.Status.UPDATED
+            assert updated_feed.last_updated > feed.last_updated
 
             # Test all entries are created
             for entry in d.entries:

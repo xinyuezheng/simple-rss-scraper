@@ -44,8 +44,8 @@ class RecentEntryManager(models.Manager):
 
 
 class Entry(models.Model):
-    guid = models.CharField(max_length=256, unique=True, null=False)
-    title = models.CharField(max_length=512, blank=True, null=True)
+    guid = models.CharField(max_length=256, unique=True, null=False, blank=False)
+    title = models.CharField(max_length=512, blank=False, null=False)
     link = models.URLField(max_length=256, blank=True, null=True)
     description = models.TextField()
     author = models.URLField(max_length=64, blank=True, null=True)
