@@ -105,6 +105,10 @@ class Feed(models.Model):
 
     @classmethod
     def get_or_create(cls, feed_url):
+        """
+        This function will only create one feed entry in 'Feed' table.
+        All the belonging feed items should be created asynchronously in a separate celery task.
+        """
         try:
             feed = cls.objects.get(feed_url=feed_url)
             create = False
@@ -115,10 +119,11 @@ class Feed(models.Model):
                 raise ValidationError(
                     f'Failed to parse feed: {d.get("bozo_exception")}', code=status.HTTP_400_BAD_REQUEST
                 )
+            published_parsed = get_published_parsed(d.feed)
 
             feed = cls.objects.create(feed_url=feed_url, title=d.feed.get('title', ''), link=d.feed.get('link', ''),
                                       description=d.feed.get('description', ''), language=d.feed.get('language', ''),
-                                      status=Feed.Status.CREATING)
+                                      status=Feed.Status.CREATING, published_time=published_parsed)
             create = True
 
         return feed, create
