@@ -73,7 +73,7 @@ def update_feed(feed_url):
             old_status = feed.update_status(
                 feed_status=Feed.Status.ERROR, published_parsed=None)
 
-            if old_status == Feed.Status.UPDATED:
+            if old_status != Feed.Status.ERROR:
                 # Notify admin
                 err_msg = f"failed to update {feed.title}"
                 send_admin_email(msg=err_msg)

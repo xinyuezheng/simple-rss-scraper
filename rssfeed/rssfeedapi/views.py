@@ -51,7 +51,9 @@ class FeedListVew(ListCreateAPIView):
         serializer.is_valid(raise_exception=True)
 
         feed_url = serializer.validated_data['feed']['feed_url']
-        feed = Feed.get_or_create(feed_url)
+        feed, create = Feed.get_or_create(feed_url)
+        if create:  # update entreis at background
+            update_feed.apply_async(args=(feed.feed_url,), queue='force_feed_update',)
 
         feed_subs = FeedSubscription.objects.filter(feed=feed, user=self.request.user).first()
         if feed_subs:

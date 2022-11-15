@@ -83,6 +83,7 @@ class Entry(models.Model):
 
 class Feed(models.Model):
     class Status(models.TextChoices):
+        CREATING = 'creating', 'creating'
         UPDATED = 'updated', 'Updated'
         ERROR = 'error', 'Error'
 
@@ -106,6 +107,7 @@ class Feed(models.Model):
     def get_or_create(cls, feed_url):
         try:
             feed = cls.objects.get(feed_url=feed_url)
+            create = False
             logger.debug(f'Find Feed: {feed.feed_url} in DB')
         except cls.DoesNotExist:
             d = feedparser.parse(feed_url)
@@ -114,26 +116,12 @@ class Feed(models.Model):
                     f'Failed to parse feed: {d.get("bozo_exception")}', code=status.HTTP_400_BAD_REQUEST
                 )
 
-            published_parsed = get_published_parsed(d.feed)
-
             feed = cls.objects.create(feed_url=feed_url, title=d.feed.get('title', ''), link=d.feed.get('link', ''),
                                       description=d.feed.get('description', ''), language=d.feed.get('language', ''),
-                                      )
+                                      status=Feed.Status.CREATING)
+            create = True
 
-            failed_entries_list = feed.update_entries(
-                parsed_entries_list=d.entries, published_parsed=published_parsed)
-
-            feed.update_status(feed_status=Feed.Status.UPDATED, published_parsed=published_parsed)
-
-            if len(failed_entries_list):
-                failed_entries_guid = ''
-                for entry_guid in failed_entries_list:
-                    failed_entries_guid += f'{entry_guid.get("id", "")},'
-                err_msg = f"Failed to create entries {failed_entries_guid} of {feed.feed_url}"
-                logger.error(err_msg)
-
-            logger.info(f'New Feed: {feed.feed_url} created')
-        return feed
+        return feed, create
 
     def update_entries(self, parsed_entries_list, published_parsed):
         """

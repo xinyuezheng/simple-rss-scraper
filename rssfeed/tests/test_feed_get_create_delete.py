@@ -38,7 +38,7 @@ class TestFeedView:
             feed_id = feed_link.rstrip('/').split('/')[-1]  # eg: 'http://testserver/feed/1/'
             assert int(feed_id) == feed_subs.feed.id
 
-    def test_follow_a_feed(self, user, api_client, feed):
+    def test_follow_a_feed(self, user, api_client, feed, celery_app):
         # Test user subscribes to a new feed (Not exist)
         d = feedparser.parse(os.path.dirname(os.path.realpath(__file__)) + '/nu.nl.rss.xml')
         published_parsed = get_published_parsed(d.feed)
@@ -58,6 +58,7 @@ class TestFeedView:
             for key in ['title', 'link', 'description', 'language']:
                 assert getattr(new_feed, key) == d.feed.get(key)
             assert new_feed.published_time == published_parsed
+            assert new_feed.status == Feed.Status.UPDATED
 
             for entry in d.entries:
                 published_parsed = get_published_parsed(entry)
