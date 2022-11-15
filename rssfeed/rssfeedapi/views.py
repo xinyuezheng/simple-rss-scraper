@@ -99,7 +99,7 @@ class FeedDetailView(RetrieveUpdateDestroyAPIView):
 
     def update(self, request, *args, **kwargs):
         feed = self.get_object()
-        update_feed.apply_async(args=(feed.id,), queue='force_feed_update',)
+        update_feed.apply_async(args=(feed.feed_url,), queue='force_feed_update',)
         return Response(f"Feed {feed.id} will be updated at background")
 
 # debug purpose

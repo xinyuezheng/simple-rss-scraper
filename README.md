@@ -14,7 +14,6 @@ Django Rest Framework with Celery+Redis for asynchronous background tasks
 There are 2 message queues set up in the system. Queue 'force_feed_update' is dedicated for user updating a feed manually. The 'default' celery queue is used by 'celery-beat' to periodically update feeds at background. There are 2 celery workers spinned up from 'docker-compose.yml' file. One worker listens only to the 'force_feed_update' queue. So the user request can be processed relative fast. The other worker listens to both queue.  
 
 
-
 To run this project, 
 1) Go to the root folder 'sendcloud_test',
 2) Build a docker image: docker build -t rssscraper .
@@ -27,6 +26,8 @@ The environment variables are specified in the 'docker.env' file in the root fol
 DAYS_RETRIEVABLE=7  => This indicates how many days a user can retrieve the followed feed entries through the APIs  
 MAXIMUM_RETRY=2 => This indicates how many times to retry if a feed fails to be updated.  
 UPDATE_INTERVAL=3600.0  => This is the interval (in seconds) celery-beat uses to update a feed at background  
+
+The database file and log file are stored in folders 'db' and 'logs' under the root folder 'sendcloud_test'. Both of them will be mounted to the containers. Therefore, data can be stored and analyzed separately.
 
 The details of APIs can be found at http://127.0.0.1:8000/swagger/ Or downloadable at http://127.0.0.1:8000/redoc/ once the docker containers are up.
 

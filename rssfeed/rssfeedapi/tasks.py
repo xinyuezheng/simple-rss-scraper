@@ -28,82 +28,90 @@ def send_email(email, msg):
     logger.info(f'send email to {email}: {msg}')
 
 
-def update_feed_entries(feed, parsed_dict):
+def update_feed_entries(feed_url, parsed_entries_list, published_parsed):
     """
+    #TODO :
     Helper function to update all entries of a feed. If error occurs on one entry update, roll back the transaction
     and continue update for other entries.
-    :param feed: Feed object
-    :param parsed_dict: parsed dictionary returned from feedparser.parse()
-    :return: True/False indicating if any error occurs during the update
+    :param feed_url:
+    :param parsed_entries_list: parsed dictionary returned from feedparser.parse()
+    :return:
     """
-    update_error = False
+    feed = Feed.objects.get(feed_url=feed_url)
+    if feed.published_time == published_parsed and feed.status == Feed.Status.UPDATED:
+        logger.info(f"Nothing to update: {feed.title}")
+        parsed_entries_list.clear()
+        return
 
-    logger.info(f'feed {feed.feed_url} is updating')
-    for entry in parsed_dict.entries:
+    for entry in list(parsed_entries_list):  # make a new list for iteration
         # continue update other entries if one or more entries update fails
         try:
             with transaction.atomic():
                 Entry.get_or_create(parsed_entry=entry, feed_id=feed.id)
+                parsed_entries_list.remove(entry)
         except Exception as e:
-            update_error = True
             logger.error(e)
 
-    return update_error
+
+def process_feed_new_status(feed_url, feed_status, published_parsed):
+    """
+    This function updates the status of feed in the database. Use 'select_for_update' to block the
+    row until the transaction is finished, to prevent other processes to change the status of the feed at the same time
+    """
+    feed = Feed.objects.select_for_update().get(feed_url=feed_url)
+    with transaction.atomic():
+        old_status = feed.status
+        feed.last_updated = timezone.now()
+        feed.status = feed_status
+        if published_parsed:
+            feed.published_time = published_parsed
+        feed.save()
+
+    if old_status == Feed.Status.UPDATED and feed_status == Feed.Status.ERROR:
+        email_list = feed.subscribers.values_list('email', flat=True)
+        for email_addr in email_list:
+            send_email(email_addr, f"failed to update {feed.title}")
 
 
 @app.task(retry_jitter=False, max_retries=MAXIMUM_RETRY,)
-def update_feed(feed_id):
+def update_feed(feed_url):
     """
     Background task to update a feed and its entries. Retry if any exception occurs.
     After reaching maximum retries, mark the feed status as 'Error' and send emails to all its subscribers.
     Do not send email again if the feed was already in Error state. This is to prevent Emails sent to other
      feed subscribers if one user manually updates an error feed which fails again.
     """
-    feed = Feed.objects.get(id=feed_id)
-    try:    # update all entries of the feed
-        d = feedparser.parse(feed.feed_url)
+    try:
+        d = feedparser.parse(feed_url)
         if d.get('bozo'):
             raise ValidationError(f'rss feedparser failed: {d.get("bozo_exception")}')
-
         published_parsed = get_published_parsed(d.feed)
-        if feed.published_time == published_parsed and feed.status == Feed.Status.UPDATED:
-            logger.info(f"Nothing to update: {feed.title}")
-            feed.last_updated = timezone.now()
-            feed.save()
-        else:
-            update_error = update_feed_entries(feed, d)
-            # indicate entry update error, trigger retry
-            if update_error:
-                raise APIException(f"Update entries of feed {feed.title} failed")
-            else:
-                feed.status = Feed.Status.UPDATED
-                feed.published_time = published_parsed
-                feed.last_updated = timezone.now()
-                feed.save()
-                logger.info(f'feed {feed.title} is updated successfully')
 
-    except (APIException, ValidationError) as e:
+        parsed_entries = d.entries
+        update_feed_entries(feed_url, parsed_entries, published_parsed)
+
+        for i in range(MAXIMUM_RETRY):  # retry failed entries if any
+            if len(parsed_entries):
+                update_feed_entries(feed_url, parsed_entries, published_parsed)
+            else:
+                break
+
+        if len(parsed_entries):
+            failed_entries_guid = ''
+            for entry_guid in parsed_entries:
+                failed_entries_guid += f'{entry_guid.get("id", "")},'
+            logger.error(f"Failed to update entries {failed_entries_guid}")
+            process_feed_new_status(feed_url, Feed.Status.ERROR, published_parsed)
+        else:
+            process_feed_new_status(feed_url, Feed.Status.UPDATED, published_parsed)
+
+    except (ValidationError, APIException) as e:
         try:
-            logger.warning(f'Update feed {feed.title} failed with exception: {e}')
+            logger.warning(f'Parse {feed_url} failed with exception: {e}')
             raise update_feed.retry(countdown=2)
         except MaxRetriesExceededError:
-            logger.error(f"Maximum retries reached. Stop updating {feed.title}")
-            send_email_flag = True
-            if feed.status == Feed.Status.ERROR:    # If feed was already in ERROR state, do not send email again
-                send_email_flag = False
-
-            feed.status = Feed.Status.ERROR
-            d = feedparser.parse(feed.feed_url)
-            if not d.get('bozo'):   # if published_time can be derived
-                published_parsed = get_published_parsed(d.feed)
-                feed.published_time = published_parsed
-            feed.last_updated = timezone.now()
-            feed.save()
-
-            if send_email_flag:
-                email_list = feed.subscribers.values_list('email', flat=True)
-                for email in email_list:
-                    send_email(email, f"failed to update {feed.title}")
+            logger.error(f"Maximum retries reached. Stop updating {feed_url}")
+            process_feed_new_status(feed_url, Feed.Status.ERROR, None)
 
 
 @app.task
@@ -114,7 +122,7 @@ def update_active_feeds():
     active_feeds = Feed.objects.annotate(
         num_subscribers=Count('subscribers')).filter(
         num_subscribers__gt=0).exclude(status=Feed.Status.ERROR)
-    g = group(update_feed.s(feed.id,) for feed in active_feeds)
+    g = group(update_feed.s(feed.feed_url,) for feed in active_feeds)
     res = g()
 
 

@@ -3,3 +3,6 @@
 rssfeed/logs/
 rssfeed/db.sqlite3
 Pipfile.lock
+RSS_reader.pdf
+rssfeed/.coverage
+rssfeed/celerybeat-schedule.db
