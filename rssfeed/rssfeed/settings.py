@@ -178,34 +178,51 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        # 'simple': {
-        #     'format': '[%(asctime)s] %(levelname)s %(message)s',
-        #     'datefmt': '%Y-%m-%d %H:%M:%S'
-        # },
         'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'format': '{levelname} {name} {asctime} {module} {process:d} {thread:d} {message}',
             'style': '{',
-            'datefmt': '%Y-%m-%d %H:%M:%S'
+        },
+        'simple': {
+            'format': '{levelname} {name} {asctime} {message}',
+            'style': '{',
         },
     },
     'handlers': {
         'console': {
-            'level': 'DEBUG',
             'class': 'logging.StreamHandler',
             'formatter': 'verbose',
         },
-        'file': {
-            'level': 'DEBUG',
+        'django_file': {
             'class': 'logging.FileHandler',
-            'filename': 'logs/rssfeed.log',
+            'filename': 'logs/django.log',
+            'formatter': 'simple',
+        },
+        'app_file': {
+            'class': 'logging.FileHandler',
+            'filename': 'logs/app.log',
+            'formatter': 'simple',
+        },
+        'worker_file': {
+            'class': 'logging.FileHandler',
+            'filename': 'logs/workers.log',
             'formatter': 'verbose',
         },
+
     },
     'loggers': {
-        'django': {
-            'handlers': ['console', 'file'],
+        '': {
+            'handlers': ['console', 'django_file'],
             'level': 'INFO',
-            'propagate': True,
+        },
+        'rssfeedapi': {
+            'handlers': ['console', 'app_file'],
+            'level': 'INFO',
+            'propagate': 'False',
+        },
+        'rssfeedapi.tasks': {
+            'handlers': ['console', 'worker_file'],
+            'level': 'DEBUG',
+            'propagate': 'False',
         },
     }
 }

@@ -47,7 +47,8 @@ Once the system is up and running, the API details can be found at
 - http://127.0.0.1:8000/redoc/ 
 - http://127.0.0.1:8000/swagger.json (export to other tools such as postman)
 
-## Test
+## Test Requirements
+- This project was developed with python version 3.8
 - pipenv dev environment is required to run tests. Run `pipenv install --dev` from the rootpath to install all required packages.  
 - Go to the site folder 'sendcloud_test/rssfeed' and run `pytest .`
 

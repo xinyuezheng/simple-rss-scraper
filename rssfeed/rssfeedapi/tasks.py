@@ -63,6 +63,7 @@ def update_feed(feed_url):
         # Continue update the feed in the future, regardless of the results of updating entries
         feed.update_status(
             feed_status=Feed.Status.UPDATED, published_parsed=published_parsed)
+        logger.info(f"Feed {feed_url} is updated")
     except (ValidationError, APIException) as e:
         try:
             logger.warning(f'Parse {feed_url} failed with exception: {e}')
