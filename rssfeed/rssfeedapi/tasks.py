@@ -1,3 +1,4 @@
+import itertools
 import logging
 from time import sleep
 
@@ -40,16 +41,14 @@ def update_feed(feed_url):
         published_parsed = get_published_parsed(d.feed)
 
         feed = Feed.objects.get(feed_url=feed_url)
-        failed_entries_list = feed.update_entries(
-            parsed_entries_list=d.entries, published_parsed=published_parsed)
 
-        for i in range(MAXIMUM_RETRY):  # retry failed entries if any
-            if len(failed_entries_list):
-                sleep(2)  # countdown 2s and retry
-                failed_entries_list = feed.update_entries(
-                     parsed_entries_list=d.entries, published_parsed=published_parsed)
-            else:
+        for i in itertools.count():
+            # retry failed entries if any
+            failed_entries_list = feed.update_entries(
+                parsed_entries_list=d.entries, published_parsed=published_parsed)
+            if len(failed_entries_list) == 0 or i == MAXIMUM_RETRY:
                 break
+            sleep(2)
 
         if len(failed_entries_list):
             failed_entries_guid = ''

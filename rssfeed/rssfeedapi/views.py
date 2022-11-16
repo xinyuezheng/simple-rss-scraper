@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
                   decorator=swagger_auto_schema(
                       operation_summary="List all feeds followed by a user, order by the subscribed date",))
 @method_decorator(name='post', decorator=swagger_auto_schema(
-    operation_summary="User subscribes to a new feed",
+    operation_summary="Subscribe to a new feed",
     operation_description="Add a feed to user's subscription list. "
                           "Create a new feed in the database if not exists",
     responses={200: feed_subscribed_200, 201: feed_subscribed_201, 400: 'rss feedparser error'},
@@ -62,15 +62,15 @@ class FeedListVew(ListCreateAPIView):
 
 @method_decorator(name='get', decorator=swagger_auto_schema(
     operation_summary=f"Show one followed feed details. "
-                      f"Only include entries published in recent {DAYS_RETRIEVABLE} days of the feed",
+                      f"Only include entries published in recent {DAYS_RETRIEVABLE} days",
 ))
 @method_decorator(name='put', decorator=swagger_auto_schema(
-    operation_summary="User manually updates the feed",
+    operation_summary="Update a feed manually",
     request_body=no_body,
     responses={200: "Feed will be updated at background"}
 ))
 @method_decorator(name='delete', decorator=swagger_auto_schema(
-    operation_summary="User unsubscribes the feed",
+    operation_summary="Unsubscribe a feed",
     responses={204: "User unsubscribes feed successfully"}
 ))
 class FeedDetailView(RetrieveUpdateDestroyAPIView):

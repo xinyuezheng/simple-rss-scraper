@@ -84,8 +84,8 @@ class TestFeedUpdate:
                 with patch('rssfeedapi.tasks.send_admin_email', mock_send_admin_email):
                     response = api_client.put(url)
                     assert response.status_code == 200
-                    # First time failed + Maximum Retry reached
-                    assert mock_entries_update.call_count == 1 + MAXIMUM_RETRY
+                    # Maximum Retry reached
+                    assert mock_entries_update.call_count == MAXIMUM_RETRY + 1
                     updated_feed = Feed.objects.get(id=feed.id)
                     published_parsed = get_published_parsed(d.feed)
                     assert updated_feed.published_time == published_parsed

@@ -1,6 +1,6 @@
 .idea
 .pytest_cache
-rssfeed/logs/
+*.log
 rssfeed/db.sqlite3
 RSS_reader.pdf
 rssfeed/.coverage
