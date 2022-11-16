@@ -1,13 +1,8 @@
 import logging
-from datetime import timedelta
 
-from celery import group
 from django.db.models import Prefetch
 from django.http import Http404
-from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
-from django.views.decorators.vary import vary_on_headers
 from drf_yasg.utils import swagger_auto_schema, no_body
 
 from rest_framework import status
@@ -28,10 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 @method_decorator(name='get',
-                  decorator=[swagger_auto_schema(
-                      operation_summary="List all feeds followed by a user, order by the subscribed date",),
-                             cache_page(60*60*2),
-                             vary_on_headers("Authorization",)])
+                  decorator=swagger_auto_schema(
+                      operation_summary="List all feeds followed by a user, order by the subscribed date",))
 @method_decorator(name='post', decorator=swagger_auto_schema(
     operation_summary="User subscribes to a new feed",
     operation_description="Add a feed to user's subscription list. "
@@ -170,8 +163,7 @@ class EntryReadView(APIView):
                 operation_description="'feed_id': Filter entries per feed. 'read': Filter read/unread entries. "
                                       "Combine those to filter read/unread entries globally or per feed",
                 manual_parameters=[feed_param, read_param],),
-        cache_page(60 * 60 * 2),
-        vary_on_headers("Authorization", )]
+        ]
 )
 class EntryListView(ListAPIView):
     serializer_class = EntryListSerializer
