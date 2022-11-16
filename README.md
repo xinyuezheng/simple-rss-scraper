@@ -16,7 +16,7 @@ a user's request to update a feed can be processed independently with other feed
 5. The system accepts both token authentication and session authentication (browsable api friendly). 
 For token authentication, send POST request to  http://127.0.0.1:8000/token/ with username and password to obtain access,refresh token pair.  `curl -d "username=string&password=string" http://127.0.0.1:8000/token/ `
 6. Requests to all other endpoints must be authenticated. By using access token, run
-`curl http://127.0.0.1:8000/feed/ -H "Accept: application/json" -H "Authorization: Bearer <access token>"`
+`curl -H "Accept: application/json" -H "Authorization: Bearer <access token>"  http://127.0.0.1:8000/feed/`
 
 ## Environment variables
 Environment variables are specified in the 'docker.env' file under the rootpath  
