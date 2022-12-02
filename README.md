@@ -1,5 +1,19 @@
 # A simple RSS scraper application which saves RSS feeds to a database and lets a user view and manage feeds
 
+## Features
+A user of this API is able to:
+- Follow and unfollow multiple feeds
+- List all feeds registered by them
+- List feed items belonging to one feed
+- Mark items as read
+- Filter read/unread feed items per feed and globally (e.g. get all unread items
+from all feeds or one feed in particular)
+- Force a feed update
+- Feeds (and feed items) is updated in a background task, asynchronously, periodically and in an unattended manner
+- If a feed fails to be updated, the system will be fall back for a while. After a certain amount of failed tries, the system will stop updating the
+feed automatically.
+- Users will be notified and able to retry the feed update if it is stalled after these failed tries.
+
 ## Overall Architecture  
 Django Rest Framework. Celery+Redis are used for processing the heavy tasks asynchronously  
 There are 2 message queues set up in the system. Queue 'force_feed_update' is dedicated for updating a feed manually from a user.
